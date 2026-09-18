@@ -80,6 +80,27 @@ list they would merely classify as destructive and prompt you). `roleBindings`
 would reshape the RBAC matrix itself; the defaults fit, so it is not used.
 Delete the whole `[policy]` block and the setup still works - you just lose the
 hard denials.
+## Offline install (no npm access)
+
+The repo ships a prebuilt bundle: `ssh-mcp-2.9.0-win-x64-offline.zip` (~22 MB) -
+ssh-mcp v2.9.0 plus all production dependencies, installed from npm on Windows
+x64 and round-trip verified (extract -> `--dumpToolHashes` -> 14 tools, exit 0).
+
+1. `git clone https://github.com/RealDioBrando/ssh-mcp-config` (or download the zip).
+2. Extract `ssh-mcp-2.9.0-win-x64-offline.zip` to e.g. `C:\tools\ssh-mcp-offline`.
+3. Verify: `node C:\tools\ssh-mcp-offline\node_modules\ssh-mcp\build\index.js --dumpToolHashes`
+   - needs Node.js >= 20.6 on PATH, the only requirement.
+4. Put your config at `%APPDATA%\ssh-mcp\config.toml` (copy `config.example.toml`,
+   fill the `<-- FILL` lines). That location has the restrictive ACL ssh-mcp
+   requires for credential files.
+5. Register with your agent using `claude-code/mcp-offline.json` instead of
+   `claude-code/mcp.json`. The permission rules in `claude-code/settings.json`
+   are unchanged - same tool names either way.
+
+The bundle includes Windows Credential Manager support (`@napi-rs/keyring`) and
+the exact `package-lock.json` of what was installed. `ssh2` runs in pure-JS mode
+(its optional native bindings were not built) - fully functional. Windows x64
+target; most contents are pure JS but the keyring binary is platform-specific.
 ## Claude Code setup
 
 1. Copy `config.example.toml` to `%APPDATA%\ssh-mcp\config.toml` and fill in the
@@ -183,4 +204,5 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+
 

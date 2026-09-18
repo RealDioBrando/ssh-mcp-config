@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ssh-mcp": {
+      "command": "node",
+      "args": [
+        "C:/tools/ssh-mcp-offline/node_modules/ssh-mcp/build/index.js",
+        "--config", "C:/Users/<you>/AppData/Roaming/ssh-mcp/config.toml"
+      ]
+    }
+  }
+}
