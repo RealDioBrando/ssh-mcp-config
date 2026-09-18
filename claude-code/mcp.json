@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ssh-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "ssh-mcp",
+        "--config", "C:/Users/<you>/AppData/Roaming/ssh-mcp/config.toml"
+      ]
+    }
+  }
+}

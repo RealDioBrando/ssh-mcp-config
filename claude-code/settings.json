@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ssh-mcp__list-connections",
+      "mcp__ssh-mcp__list-sessions",
+      "mcp__ssh-mcp__open-session",
+      "mcp__ssh-mcp__close-session",
+      "mcp__ssh-mcp__read-session-output",
+      "mcp__ssh-mcp__read-command",
+      "mcp__ssh-mcp__run-command",
+      "mcp__ssh-mcp__signal-process",
+      "mcp__ssh-mcp__sftp-upload"
+    ],
+    "deny": [
+      "mcp__ssh-mcp__privileged-command",
+      "mcp__ssh-mcp__sftp-download",
+      "mcp__ssh-mcp__sftp-list",
+      "mcp__ssh-mcp__sftp-upload-file",
+      "mcp__ssh-mcp__sftp-download-file"
+    ],
+    "disableBypassPermissionsMode": true
+  }
+}
