@@ -1,0 +1,3 @@
+# Your filled-in config with real host/key details - keep it out of the repo.
+config.toml
+*.local.toml

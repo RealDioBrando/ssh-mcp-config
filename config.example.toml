@@ -1,0 +1,97 @@
+# =====================================================================
+# ssh-mcp v2.9.0 - single-agent / root-user config
+# Upstream: https://github.com/tufantunc/ssh-mcp
+#
+# 1. Copy this file to:  %APPDATA%\ssh-mcp\config.toml
+#    (or keep it anywhere and pass:  npx ssh-mcp --config=C:/path/config.toml)
+# 2. Fill in every line marked <-- FILL.
+# 3. The filled-in config.toml is gitignored so your host/key details
+#    never get committed.
+# =====================================================================
+
+[defaults]
+defaultProfile = "server"
+approvalMode = "ask-destructive"   # fallback if a profile omits approvalPolicy
+
+# After you approve a destructive command once, the IDENTICAL command on the
+# same profile re-runs without prompting for this long. 0 = always prompt.
+# 5 minutes covers an iterative debug loop without training you to click
+# through prompts. Raise it if that is still too much labor.
+approvalGrantTtlMs = 300000
+
+# Builds and training runs are slow and chatty.
+commandTimeoutMs = 600000          # 10 min per command
+commandMaxChars = 5000
+commandMaxOutputBytes = 8388608    # 8 MB output cap per command
+
+# Session hygiene (gdb / tail -f style interactive use).
+sessionMaxPerConnection = 5
+sessionIdleTimeoutMs = 600000      # 10 min idle -> close session
+sessionBackgroundMaxMs = 3600000   # 1 h hard max for a background job
+connectionIdleReapMs = 900000      # 15 min idle connection -> close
+
+# 0 = unlimited commands. Set e.g. 300 for a daily circuit breaker against a
+# runaway agent loop.
+commandQuotaPerDay = 0
+
+# v2.9.0 streaming SFTP tools (sftp-list / sftp-upload-file / sftp-download-file).
+# transferRoot is the ONLY local directory those tools may touch; without it
+# they refuse - there is no setting that means "anywhere".
+# WINDOWS CAVEAT: on a Windows client the two transfer tools refuse regardless,
+# because ssh-mcp cannot yet verify a private transfer root there. sftp-list
+# works everywhere. Keep the caps below anyway; they are harmless.
+transferMaxBytes = 268435456       # 256 MB per transfer
+transferTimeoutMs = 300000         # 5 min IDLE budget, not total
+# transferRoot = "C:/ssh-mcp-transfers"   # only useful on Linux/macOS clients
+
+# ---------------------------------------------------------------------
+# The one profile: shared server, root user (accepted risk).
+#
+# role "operator" = read-only + safe + destructive, but NOT privileged.
+#   - Root does not need sudo, so denying the privileged class costs nothing
+#     and removes the privileged-command tool from the agent's reach.
+#   - "destructive" is allowed by role but gated by ask-destructive below:
+#     rm/kill/chmod prompt you instead of silently running.
+#
+# group = "dev" is REQUIRED here. Without it the tier is inferred from the
+# profile name; a name without prod/staging/dev resolves to "prod", where
+# operator can only run read-only + safe and every destructive command is
+# DENIED outright instead of prompting.
+# ---------------------------------------------------------------------
+[[profiles]]
+name = "server"
+host = "SERVER_HOST"               # <-- FILL
+port = 22
+user = "root"                      # your accepted risk
+auth = "key"                       # key | password | agent
+keyRef = "~/.ssh/id_ed25519"       # <-- FILL (path to your private key)
+workdir = "/root/project"          # <-- FILL (where code lives on the server)
+group = "dev"                      # do not remove - see note above
+role = "operator"
+readOnly = false
+approvalPolicy = "ask-destructive" # scripts auto-run; rm/kill/chmod prompt you
+sessionMaxPerConnection = 3        # room for one gdb / tail -f session
+
+# Optional, but the one control that survives a server restart: pin the host
+# key. Get it on the server with:
+#   ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+# A placeholder value here is NOT inert - it pins to nothing and every
+# connection is refused. Only uncomment with the real fingerprint.
+# trustedHostKey = "SHA256:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# ---------------------------------------------------------------------
+# Your denylist = things an agent may NEVER do, even with approval.
+# These are added to ssh-mcp's built-in never-allowed list (rm -rf /, mkfs,
+# fork bombs, chmod -R 777 /, writing authorized_keys, iptables -F, ...).
+#
+# Keep this list for "never" only. Routine-but-risky operations (rm -rf
+# build/, chmod -R on a data dir, kill) should NOT be here - they classify
+# as destructive and get the approval prompt instead, which is the right
+# treatment: reviewable, not forbidden.
+# ---------------------------------------------------------------------
+[policy]
+denylist = [
+  "^shutdown",            # shared box: affects everyone, never from an agent
+  "^reboot",
+  "^git push --force",    # shared history: never from an agent
+]

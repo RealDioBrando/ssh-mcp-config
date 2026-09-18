@@ -1,0 +1,56 @@
+# =====================================================================
+# Merge into:  C:\Users\<you>\.codex\config.toml
+# This is a SNIPPET - do not replace your whole config file.
+#
+# NOTE: if your config already has an `approval_policy = "..."` line,
+# replace it with the [approval_policy.granular] table below - you
+# cannot have both.
+# =====================================================================
+
+# Route approval prompts to YOU (not auto-review). A human stays on the
+# destructive band. Switch to "auto_review" only if you accept a reviewer
+# model instead - see README.md.
+approvals_reviewer = "user"
+
+# Which approval categories may prompt you at all. mcp_elicitations MUST be
+# true: ssh-mcp's destructive-command approvals arrive as MCP elicitations,
+# and with this false they are auto-REJECTED, not approved.
+[approval_policy.granular]
+sandbox_approval = true
+rules = true
+skill_approval = false
+request_permissions = false
+mcp_elicitations = true
+
+[mcp_servers.ssh-mcp]
+command = "npx"
+args = [
+  "ssh-mcp",
+  "--config", "C:/Users/<you>/AppData/Roaming/ssh-mcp/config.toml",
+]
+# If the server fails to start on Windows, the usual cause is npx resolution.
+# Replace command/args with:
+#   command = "cmd"
+#   args = ["/c", "npx", "ssh-mcp", "--config", "C:/Users/<you>/AppData/Roaming/ssh-mcp/config.toml"]
+
+# npx cold start can be slow; builds run long.
+startup_timeout_sec = 60
+tool_timeout_sec = 900        # 15 min, above ssh-mcp's 10-min commandTimeoutMs
+
+# STRUCTURAL tool scoping: only these ssh-mcp tools are even registered.
+# The agent cannot see, call, or be prompt-injected into the excluded ones.
+# Excluded: privileged-command (root needs no sudo), sftp-download and
+# sftp-list (read-command "cat"/"ls" covers them), sftp-upload-file and
+# sftp-download-file (they refuse on Windows anyway).
+# Re-enable any of them by adding its name to this list.
+enabled_tools = [
+  "list-connections",       # discover the configured host
+  "list-sessions",
+  "open-session",           # interactive shell (gdb) / background jobs (tail -f)
+  "close-session",
+  "read-session-output",
+  "read-command",           # read-only inspection: nvidia-smi, ps, tail, ls
+  "run-command",            # build/test/debug; policy-gated by ssh-mcp
+  "signal-process",         # kill a runaway job (destructive -> prompts)
+  "sftp-upload",            # put a script on the server (destructive -> prompts)
+]
