@@ -38,6 +38,48 @@ Note the split: the denylist is for *never*; the approval gate is for
 *routine-but-risky* (cleaning a build dir, killing a job). That is why `rm -rf` is
 NOT in the denylist - it would make normal cleanup impossible instead of reviewed.
 
+## Multiple servers and password auth
+
+**Multiple servers:** yes - each `[[profiles]]` block is one server, with its own
+`role` / `group` / `approvalPolicy`, so trust can differ per machine (a build box
+can be `operator`/`dev` while a database host is `viewer`/`prod`, read-only). The
+agent selects with the `profile` tool argument; `defaults.defaultProfile` is used
+when it doesn't. `via = "profile-name"` chains through a bastion. See the
+commented examples in `config.example.toml`.
+
+**Password auth:** yes - `auth = "password"` on the profile, but the password
+itself never goes in the config file or on the command line. It comes from an
+environment variable:
+
+- `SSH_MCP_<PROFILE>_PASSWORD` - per profile. Non-alphanumerics become
+  underscores: profile `server` -> `SSH_MCP_SERVER_PASSWORD`, `gpu-01` ->
+  `SSH_MCP_GPU_01_PASSWORD`.
+- `SSH_MCP_PASSWORD` - generic fallback for all profiles.
+
+On Windows: `setx SSH_MCP_SERVER_PASSWORD "..."` once, then restart the agent so
+the MCP server process inherits it - that keeps the secret out of every config
+file. (Alternative: `auth = "keychain"` + `keychainEntry` uses Windows
+Credential Manager via the optional `@napi-rs/keyring` dependency.)
+
+## What role/group already covers vs. the extra [policy] block
+
+`role` + `group` + `approvalPolicy` are the main machinery:
+
+1. **role x group** (the RBAC matrix) decides which command *classes* may run at
+   all - `operator` on `dev` allows read-only + safe + destructive, denies
+   privileged (sudo).
+2. **approvalPolicy** decides what happens to an allowed-but-dangerous class:
+   `ask-destructive` prompts you before destructive commands run.
+3. ssh-mcp's **built-in never-allowed list** (`rm -rf /`, `mkfs`, fork bombs,
+   `chmod -R 777 /`, writing `authorized_keys`, `iptables -F`, ...) always
+   applies and cannot be switched off by any config.
+
+The `[policy]` section is purely additional: `denylist` adds *your* never-allow
+rules on top (here: `shutdown`/`reboot`/force-push on a shared box - without the
+list they would merely classify as destructive and prompt you). `roleBindings`
+would reshape the RBAC matrix itself; the defaults fit, so it is not used.
+Delete the whole `[policy]` block and the setup still works - you just lose the
+hard denials.
 ## Claude Code setup
 
 1. Copy `config.example.toml` to `%APPDATA%\ssh-mcp\config.toml` and fill in the
@@ -141,3 +183,4 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+

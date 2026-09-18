@@ -45,32 +45,53 @@ transferTimeoutMs = 300000         # 5 min IDLE budget, not total
 # transferRoot = "C:/ssh-mcp-transfers"   # only useful on Linux/macOS clients
 
 # ---------------------------------------------------------------------
-# The one profile: shared server, root user (accepted risk).
+# Profile 1: the main shared server, root user (accepted risk).
 #
-# role "operator" = read-only + safe + destructive, but NOT privileged.
-#   - Root does not need sudo, so denying the privileged class costs nothing
-#     and removes the privileged-command tool from the agent's reach.
-#   - "destructive" is allowed by role but gated by ask-destructive below:
-#     rm/kill/chmod prompt you instead of silently running.
+# HOW POLICY WORKS HERE - three layers, in order:
+#   1. role + group  -> the RBAC matrix. This is the MAIN machinery: it
+#      decides which command CLASSES may run at all on this server.
+#      operator + dev = read-only + safe + destructive, NOT privileged.
+#   2. approvalPolicy -> what happens to an allowed-but-dangerous class:
+#      "ask-destructive" means destructive commands prompt you first.
+#   3. [policy].denylist below -> purely ADDITIONAL never-allow rules for
+#      this shared box. ssh-mcp's built-in never-allowed list (rm -rf /,
+#      mkfs, fork bombs, chmod -R 777 /, ...) always applies on top of
+#      everything and cannot be switched off.
 #
-# group = "dev" is REQUIRED here. Without it the tier is inferred from the
-# profile name; a name without prod/staging/dev resolves to "prod", where
-# operator can only run read-only + safe and every destructive command is
-# DENIED outright instead of prompting.
+# AUTH - four methods, credentials NEVER go in this file or on the CLI:
+#   auth = "key"       + keyRef below; passphrase via SSH_MCP_<NAME>_PASSPHRASE
+#   auth = "password"  + SSH_MCP_<NAME>_PASSWORD env var (see below)
+#   auth = "agent"     + a running ssh-agent (SSH_AUTH_SOCK)
+#   auth = "keychain"  + keychainEntry; Windows Credential Manager via
+#                        @napi-rs/keyring (optional dependency)
+# For a profile named "server", the password env var is SSH_MCP_SERVER_PASSWORD.
+# Non-alphanumeric characters in the name become underscores: profile
+# "gpu-01" -> SSH_MCP_GPU_01_PASSWORD. A generic SSH_MCP_PASSWORD also works
+# as fallback for all profiles. On Windows, setx SSH_MCP_SERVER_PASSWORD "..."
+# once, then restart the agent so the MCP server inherits it - that keeps the
+# password out of every config file.
 # ---------------------------------------------------------------------
 [[profiles]]
 name = "server"
 host = "SERVER_HOST"               # <-- FILL
 port = 22
 user = "root"                      # your accepted risk
-auth = "key"                       # key | password | agent
+auth = "key"                       # key | password | agent | keychain
 keyRef = "~/.ssh/id_ed25519"       # <-- FILL (path to your private key)
+# For password auth instead, use:
+#   auth = "password"
+#   (and remove keyRef; set SSH_MCP_SERVER_PASSWORD in the environment)
 workdir = "/root/project"          # <-- FILL (where code lives on the server)
-group = "dev"                      # do not remove - see note above
+group = "dev"                      # REQUIRED - see note below
 role = "operator"
 readOnly = false
 approvalPolicy = "ask-destructive" # scripts auto-run; rm/kill/chmod prompt you
 sessionMaxPerConnection = 3        # room for one gdb / tail -f session
+
+# group = "dev" is REQUIRED here. Without it the tier is inferred from the
+# profile name; a name without prod/staging/dev resolves to "prod", where
+# operator can only run read-only + safe and every destructive command is
+# DENIED outright instead of prompting.
 
 # Optional, but the one control that survives a server restart: pin the host
 # key. Get it on the server with:
@@ -80,14 +101,53 @@ sessionMaxPerConnection = 3        # room for one gdb / tail -f session
 # trustedHostKey = "SHA256:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # ---------------------------------------------------------------------
+# Profile 2 (optional): MORE SERVERS. Just add another [[profiles]] block.
+# Every profile carries its own role / group / approvalPolicy, so trust can
+# differ per machine. The agent picks one with the "profile" tool argument;
+# "server" above is the default. Examples:
+#
+# A second build box, same trust as the first:
+#
+# [[profiles]]
+# name = "gpu-01"
+# host = "GPU01_HOST"
+# port = 22
+# user = "root"
+# auth = "password"                # password lives in SSH_MCP_GPU_01_PASSWORD
+# workdir = "/root/project"
+# group = "dev"
+# role = "operator"
+# approvalPolicy = "ask-destructive"
+#
+# A server you only want the agent to LOOK at, never touch:
+#
+# [[profiles]]
+# name = "prod-db"
+# host = "DB_HOST"
+# port = 22
+# user = "root"
+# auth = "key"
+# keyRef = "~/.ssh/id_ed25519"
+# group = "prod"
+# role = "viewer"                  # read-only class only
+# readOnly = true
+# approvalPolicy = "auto"          # nothing to prompt: viewer can only read
+#
+# Reach a host through a bastion with:  via = "bastion-profile-name"
+# ---------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
 # Your denylist = things an agent may NEVER do, even with approval.
 # These are added to ssh-mcp's built-in never-allowed list (rm -rf /, mkfs,
 # fork bombs, chmod -R 777 /, writing authorized_keys, iptables -F, ...).
 #
-# Keep this list for "never" only. Routine-but-risky operations (rm -rf
-# build/, chmod -R on a data dir, kill) should NOT be here - they classify
-# as destructive and get the approval prompt instead, which is the right
-# treatment: reviewable, not forbidden.
+# This section is OPTIONAL: role + group + approvalPolicy above already do
+# the main work. Without this list, shutdown/reboot/force-push would simply
+# classify as destructive and prompt you; with it they are refused outright,
+# which is the right call on a shared box.
+#
+# [policy].roleBindings would let you reshape the RBAC matrix itself -
+# not used here, the defaults fit.
 # ---------------------------------------------------------------------
 [policy]
 denylist = [
