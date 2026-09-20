@@ -232,17 +232,46 @@ Expected output (v2.9.0): 14 tool entries, then exit code 0:
 - Each value is the SHA-256 of that tool's description (first 16 hex chars) -
   diffing them between versions tells you whether the agent-visible tool
   behavior changed.
+## Troubleshooting: two startup errors
+
+**`--config needs a path: --config=<path>`** - ssh-mcp's argument parser only
+accepts the `--flag=value` form, as a single argument. `"--config", "C:/path"`
+(two array elements) does NOT work; use one element:
+`"--config=C:/path/config.toml"`. This is ssh-mcp's parser, not your agent's.
+Better still: put the config at the default location
+`%APPDATA%\ssh-mcp\config.toml` and drop `--config` entirely.
+
+**`Config file ... can be modified by accounts other than its owner`** -
+ssh-mcp's Windows ACL check (also ssh-mcp's behavior, not your agent's). The
+config names your servers and decides what the agent may do, so ssh-mcp
+refuses to run from a file - or a folder - that other local accounts can read
+or modify. A config on `D:\` inherits broad ACLs (Users, Authenticated Users)
+and fails this check.
+
+Fix, easiest first:
+
+1. Move the config to `%APPDATA%\ssh-mcp\config.toml` (create the folder
+   with `mkdir $env:APPDATA\ssh-mcp`). User-profile folders already have the
+   restricted ACL ssh-mcp requires, and the default location also removes
+   the need for `--config` at all.
+2. Or keep your location and run the two `icacls` commands ssh-mcp prints -
+   on BOTH the config file and the folder containing it (both are checked).
+   On a drive outside your user profile, stripping broad entries from the
+   folder can affect other users of the machine, which is why option 1 is
+   recommended.
 ## Claude Code setup
 
-1. Copy `config.example.toml` to `%APPDATA%\ssh-mcp\config.toml` and fill in the
-   three `<-- FILL` lines: host, user, workdir. Store the password once with
-   `.\set-credential.ps1 -Account server` (or `-Batch -Accounts server,gpu-01`
-   for many servers) - it never goes in the config file.
+1. Create the config folder and file (PowerShell):
+   `mkdir $env:APPDATA\ssh-mcp -Force`, then copy `config.example.toml` there
+   as `config.toml` and fill in the three `<-- FILL` lines: host, user,
+   workdir. Store the password once with `.\set-credential.ps1 -Account server`
+   (or `-Batch -Accounts server,gpu-01` for many servers) - it never goes in
+   the config file.
 2. Register the MCP server: merge `claude-code/mcp.json` into your project's
    `.mcp.json` (or `~/.claude.json`), or run:
-   `claude mcp add ssh-mcp -- npx ssh-mcp --config <path-to-config.toml>`
-   On Windows, if `npx` fails to spawn, use `"command": "cmd"` with
-   `"args": ["/c", "npx", "ssh-mcp", "--config", "<path>"]`.
+   `claude mcp add ssh-mcp -- npx ssh-mcp`
+   No `--config` is needed at the default location. On Windows, if `npx`
+   fails to spawn, use `"command": "cmd"` with `"args": ["/c", "npx", "ssh-mcp"]`.
 3. Merge `claude-code/settings.json` into your settings (`.claude/settings.local.json`
    or `~/.claude/settings.json`).
 
@@ -337,6 +366,7 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+
 
 
 

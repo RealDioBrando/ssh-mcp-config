@@ -15,7 +15,13 @@ Should print a JSON map of 14 tool names to hashes and exit with code 0.
 
 ## Run
 
-    node node_modules\ssh-mcp\build\index.js --config C:\path\to\config.toml
+    node node_modules\ssh-mcp\build\index.js
+
+Reads the config automatically from %APPDATA%\ssh-mcp\config.toml. For a
+custom location, pass ONE argument with "=" (the two-token form does not
+work in ssh-mcp's parser):
+
+    node node_modules\ssh-mcp\build\index.js --config=D:/path/config.toml
 
 ## Wire into your agent (Claude Code style mcp.json)
 
@@ -24,12 +30,15 @@ Should print a JSON map of 14 tool names to hashes and exit with code 0.
         "ssh-mcp": {
           "command": "node",
           "args": [
-            "C:/tools/ssh-mcp-offline/node_modules/ssh-mcp/build/index.js",
-            "--config", "C:/Users/<you>/AppData/Roaming/ssh-mcp/config.toml"
+            "C:/tools/ssh-mcp-offline/node_modules/ssh-mcp/build/index.js"
           ]
         }
       }
     }
+
+No --config argument: the config lives at the default location
+%APPDATA%\ssh-mcp\config.toml (create that folder if it does not exist).
+That location also passes ssh-mcp's Windows ACL check automatically.
 
 ## Notes
 

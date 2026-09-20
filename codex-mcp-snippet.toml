@@ -24,14 +24,14 @@ mcp_elicitations = true
 
 [mcp_servers.ssh-mcp]
 command = "npx"
-args = [
-  "ssh-mcp",
-  "--config", "C:/Users/<you>/AppData/Roaming/ssh-mcp/config.toml",
-]
-# If the server fails to start on Windows, the usual cause is npx resolution.
-# Replace command/args with:
-#   command = "cmd"
-#   args = ["/c", "npx", "ssh-mcp", "--config", "C:/Users/<you>/AppData/Roaming/ssh-mcp/config.toml"]
+args = ["ssh-mcp"]
+# The config is read from the default location:
+#   C:\Users\<you>\AppData\Roaming\ssh-mcp\config.toml
+# No --config argument is needed there. If you must use a custom path, it
+# must be ONE argument with "=" (ssh-mcp's parser rejects the two-token
+# form): "--config=D:/path/to/config.toml"
+# If the server fails to start on Windows, the usual cause is npx
+# resolution; use command = "cmd" with args = ["/c", "npx", "ssh-mcp"].
 
 # npx cold start can be slow; builds run long.
 startup_timeout_sec = 60
