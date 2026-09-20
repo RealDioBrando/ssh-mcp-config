@@ -80,6 +80,8 @@ For a bunch of servers, Credential Manager is the tidier fit - and
     .\set-credential.ps1 -Account gpu-01 -Test
     .\set-credential.ps1 -Account gpu-01 -Delete
     .\set-credential.ps1 -List               # all ssh-mcp/* entries (names only)
+    .\set-credential.ps1 -Batch -Accounts gpu-01,gpu-02,web-1
+    .\set-credential.ps1 -Batch -AccountList C:\tools\server-names.txt
 
 Defaults: service `ssh-mcp`, bundle at `C:\tools\ssh-mcp-offline` (override
 with `-BundlePath`). The password is passed to node via stdin - never a
@@ -87,6 +89,31 @@ command-line argument - and the helper uses the same `@napi-rs/keyring`
 library from the bundle that ssh-mcp reads with. Verified end-to-end: a
 credential stored by the helper was read back by ssh-mcp's own
 `resolveCredentials()`.
+
+### Batch mode (many servers, one run)
+
+Both batch forms take **names only** - never passwords. The script validates
+every name first (no whitespace, `/` or `\`, because a typo'd name would
+silently store the credential under the wrong name), then prompts for each
+password with masked input, one after another. Ctrl+C mid-batch is safe:
+entries already stored stay stored.
+
+**Do not prepare a list of passwords.** A `server,password` file recreates the
+plaintext-on-disk problem the keychain exists to solve - and deleting such a
+file is not reliable (recycle bin, SSD wear-leveling, editor history, sync
+folders, backups). Names in a file; secrets at the prompt.
+
+### Persistence
+
+Everything here is one-time setup:
+
+- Credential Manager entries survive reboots, logouts and agent restarts.
+- `config.toml` profiles are a plain file, read at server startup.
+- `setx` env vars live in the registry (`HKCU\Environment`).
+
+The only ephemeral thing is the SSH connection itself (closed when idle,
+reopened using the stored credential). Re-run the helper for a single account
+only when that server's password changes - storing again overwrites the entry.
 
 Then the profile:
 
@@ -293,6 +320,7 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+
 
 
 

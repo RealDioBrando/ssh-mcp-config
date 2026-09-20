@@ -1,18 +1,25 @@
 <#
 .SYNOPSIS
-Store a server password in Windows Credential Manager for ssh-mcp keychain auth.
+Store server passwords in Windows Credential Manager for ssh-mcp keychain auth.
 
 .DESCRIPTION
-Prompts for the password with masked input and stores it in Windows Credential
+Prompts for each password with masked input and stores it in Windows Credential
 Manager under service "ssh-mcp" (or -Service), using the same library ssh-mcp
-reads with (@napi-rs/keyring from the offline bundle). Verifies by reading it
-back, then prints the exact profile lines to paste into config.toml.
+reads with (@napi-rs/keyring from the offline bundle). Verifies each entry by
+reading it back, then prints the profile lines to paste into config.toml.
 
-The password travels PowerShell -> node via stdin, never as a command-line
-argument, so it never shows in a process list.
+Passwords travel PowerShell -> node via stdin, never as command-line
+arguments, so they never show in a process list. Never put passwords in a
+file - provide names only, and let this script prompt for each secret.
 
 .EXAMPLE
 .\set-credential.ps1 -Account gpu-01
+
+.EXAMPLE
+.\set-credential.ps1 -Batch -Accounts gpu-01,gpu-02,web-1
+
+.EXAMPLE
+.\set-credential.ps1 -Batch -AccountList C:\tools\server-names.txt
 
 .EXAMPLE
 .\set-credential.ps1 -Account gpu-01 -Test
@@ -35,7 +42,18 @@ param(
   [switch]$Test,
 
   [Parameter(ParameterSetName = 'List')]
-  [switch]$List
+  [switch]$List,
+
+  [Parameter(ParameterSetName = 'Batch')]
+  [switch]$Batch,
+
+  # Comma-separated account names. NAMES ONLY - never passwords.
+  [Parameter(ParameterSetName = 'Batch')]
+  [string]$Accounts,
+
+  # Path to a text file with one account name per line. NAMES ONLY.
+  [Parameter(ParameterSetName = 'Batch')]
+  [string]$AccountList
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,6 +65,29 @@ if (-not (Test-Path -LiteralPath $keychainJs)) {
 }
 if (-not (Test-Path -LiteralPath (Join-Path $BundlePath "package.json"))) {
   throw "Offline bundle not found at: $BundlePath (the extracted folder with package.json and node_modules). Use -BundlePath."
+}
+
+function Read-MaskedSecret([string]$prompt) {
+  $secure = Read-Host -AsSecureString $prompt
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+  try {
+    return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+  } finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+  }
+}
+
+function Store-Secret([string]$accountName, [string]$plain) {
+  # PS 5.1 pipes to native processes as ASCII by default; force UTF-8 so
+  # non-ASCII passwords survive the trip.
+  $prevEncoding = $OutputEncoding
+  $OutputEncoding = New-Object System.Text.UTF8Encoding $false
+  try {
+    $plain | node $keychainJs $BundlePath set $Service $accountName
+    if ($LASTEXITCODE -ne 0) { throw "Storing $Service/$accountName failed." }
+  } finally {
+    $OutputEncoding = $prevEncoding
+  }
 }
 
 if ($List) {
@@ -62,23 +103,53 @@ if ($Delete) {
   exit $LASTEXITCODE
 }
 
-# Masked prompt. Plain text exists only in memory for the pipe below.
-$secure = Read-Host -AsSecureString "Password for $Service/$Account"
-$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-try {
-  $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-} finally {
-  [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+if ($Batch) {
+  if ($Accounts -and $AccountList) {
+    throw "Use either -Accounts or -AccountList, not both."
+  }
+  $names = @()
+  if ($Accounts) { $names += ($Accounts -split ',') }
+  if ($AccountList) {
+    if (-not (Test-Path -LiteralPath $AccountList)) { throw "Account list file not found: $AccountList" }
+    $names += (Get-Content -LiteralPath $AccountList)
+  }
+  $names = @($names | ForEach-Object { "$_".Trim() } | Where-Object { $_ } | Select-Object -Unique)
+  if (-not $names.Count) { throw "No account names. Pass -Accounts a,b,c or -AccountList <file> (names only, no passwords)." }
+
+  # Validate every name BEFORE prompting, so a typo does not leave a
+  # half-finished batch. '/' and '\' would break keychainEntry parsing.
+  $bad = @($names | Where-Object { $_ -match '[\s/\\]' })
+  if ($bad.Count) { throw "Invalid account name(s) - must not contain whitespace, / or \: $($bad -join ', ')" }
+
+  ""
+  "Batch: $($names.Count) account(s). You will be prompted for each password"
+  "with masked input. Ctrl+C is safe - already-stored entries stay stored."
+  ""
+  $done = @()
+  foreach ($n in $names) {
+    $plain = Read-MaskedSecret "Password for $Service/$n"
+    try {
+      Store-Secret $n $plain
+      $done += $n
+      "  stored $Service/$n"
+    } finally {
+      $plain = $null
+    }
+  }
+  ""
+  "Done. For each profile in %APPDATA%\ssh-mcp\config.toml add:"
+  "    auth = `"keychain`""
+  "    keychainEntry = `"$Service/<account>`""
+  "Accounts stored this run: $($done -join ', ')"
+  "Do NOT set keyRef on these profiles: with keychain auth, keyRef means the"
+  "entry holds a private key instead of a password."
+  exit 0
 }
 
-# PS 5.1 pipes to native processes as ASCII by default; force UTF-8 so
-# non-ASCII passwords survive the trip.
-$prevEncoding = $OutputEncoding
-$OutputEncoding = New-Object System.Text.UTF8Encoding $false
+# Single-account mode.
+$plain = Read-MaskedSecret "Password for $Service/$Account"
 try {
-  $plain | node $keychainJs $BundlePath set $Service $Account
-  if ($LASTEXITCODE -ne 0) { throw "Storing the credential failed." }
-
+  Store-Secret $Account $plain
   ""
   "Stored. Add these lines to that server's profile in %APPDATA%\ssh-mcp\config.toml:"
   ""
@@ -89,5 +160,5 @@ try {
   "entry holds a private key instead of a password."
 } finally {
   $plain = $null
-  $OutputEncoding = $prevEncoding
 }
+
