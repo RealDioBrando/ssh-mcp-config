@@ -8,6 +8,9 @@ PowerShell session, and reports every step: config, profile, keychain entry
 presence, environment variables, resolved credential sources, and the actual
 connection result. Prints lengths only - never a secret.
 
+With no -Profile, tests ALL configured profiles in sequence and prints a
+summary. Profiles using ProxyJump (via) are tested through their bastion.
+
 .EXAMPLE
 .\test-connection.ps1
 
@@ -33,3 +36,4 @@ if ($Profile) {
   node $js $BundlePath
 }
 exit $LASTEXITCODE
+

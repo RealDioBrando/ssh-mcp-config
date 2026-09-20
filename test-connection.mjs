@@ -4,7 +4,8 @@
 // the result is exactly what the MCP server would see in this session.
 //
 // Usage:
-//   node test-connection.mjs <bundlePath> [profileName] [--config=<path>]
+//   node test-connection.mjs <bundlePath> [--config=<path>]           # ALL profiles
+//   node test-connection.mjs <bundlePath> <profileName> [--config=]   # ONE profile
 //
 // Prints only names, booleans and lengths - never a secret.
 
@@ -20,6 +21,7 @@ const profileArg = args.find((a) => !a.startsWith('--') && a !== bundlePath);
 
 if (!bundlePath) {
   console.error('usage: node test-connection.mjs <bundlePath> [profileName] [--config=<path>]');
+  console.error('       no profileName = test ALL profiles, then print a summary');
   process.exit(2);
 }
 
@@ -54,76 +56,143 @@ try {
 }
 
 console.log('config path :', configArg ? configArg.slice('--config='.length) : getConfigPath());
-console.log('profiles    :', config.profiles.map((p) => p.name).join(', ') || '(none)');
-
-const profile = profileArg
-  ? config.profiles.find((p) => p.name === profileArg)
-  : config.profiles.find((p) => p.name === config.defaults.defaultProfile) || config.profiles[0];
-if (!profile) {
-  console.error('profile not found: ' + (profileArg || '(default)'));
+if (!config.profiles.length) {
+  console.error('No profiles configured.');
   process.exit(1);
 }
+console.log('profiles    :', config.profiles.map((p) => p.name).join(', '));
 
-console.log('profile     :', profile.name);
-console.log('target      :', profile.host + ':' + profile.port + ' as ' + profile.user);
-console.log('auth        :', profile.auth + (profile.keychainEntry ? ' (' + profile.keychainEntry + ')' : ''));
-if (profile.auth !== 'keychain') {
-  console.log('NOTE        : auth is not "keychain" - a set-credential.ps1 entry is NOT used by this profile.');
-}
-
-// 2. Keychain diagnostics: direct read with the same library ssh-mcp uses.
 const keyringAvailable = await initKeychain();
 console.log('keyring     :', keyringAvailable ? 'available' : 'UNAVAILABLE in this process');
-if (profile.auth === 'keychain') {
+
+const req = createRequire(path.join(bundlePath, 'package.json'));
+let keyring = null;
+try {
+  keyring = req('@napi-rs/keyring');
+} catch {
+  /* diagnostics below report this per profile */
+}
+
+const msg = (e) => (e && e.message ? e.message : String(e));
+const withTimeout = (p, label) =>
+  Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(label + ' outer timeout (30s)')), 30000)),
+  ]);
+
+// ProxyJump support, mirroring ConnectionRegistry: connect the bastion
+// (recursively, for chains), then forward a channel to the target.
+async function openJump(profile, created) {
+  if (!profile.via) return undefined;
+  const viaProfile = config.profiles.find((p) => p.name === profile.via);
+  if (!viaProfile) throw new Error('via profile not found: ' + profile.via);
+  const nestedSock = await openJump(viaProfile, created);
+  const viaCreds = await resolveCredentials(viaProfile);
+  const bastion = new SSHConnection(viaProfile, viaCreds, new Map(), 'tofu', nestedSock);
+  created.push(bastion);
+  await withTimeout(bastion.ensureConnected(), 'bastion "' + viaProfile.name + '"');
+  const client = bastion.getClient();
+  return await new Promise((resolve, reject) => {
+    client.forwardOut('', 0, profile.host, profile.port, (err, stream) => {
+      if (err) reject(new Error('ProxyJump via "' + profile.via + '" failed: ' + err.message));
+      else resolve(stream);
+    });
+  });
+}
+
+async function testProfile(profile) {
+  console.log('');
+  console.log('=== profile: ' + profile.name + ' ===');
+  console.log('target      :', profile.host + ':' + profile.port + ' as ' + profile.user);
+  console.log('auth        :', profile.auth + (profile.keychainEntry ? ' (' + profile.keychainEntry + ')' : '') + (profile.via ? ' via ' + profile.via : ''));
+  if (profile.auth !== 'keychain') {
+    console.log('NOTE        : auth is not "keychain" - a set-credential.ps1 entry is NOT used by this profile.');
+  }
+
+  // Keychain diagnostics: direct read with the same library ssh-mcp uses.
+  if (profile.auth === 'keychain') {
+    try {
+      if (!keyring) throw new Error('keyring library unavailable');
+      const [svc, acc] = (profile.keychainEntry || '').split('/');
+      const stored = new keyring.Entry(svc || 'ssh-mcp', acc || profile.name).getPassword();
+      console.log('keychain    :', stored == null ? 'entry NOT FOUND' : 'entry present (' + stored.length + ' chars)');
+    } catch (e) {
+      console.log('keychain    : READ FAILED - ' + msg(e));
+    }
+  }
+
+  // Environment variable diagnostics (names and lengths only).
+  const envName =
+    'SSH_MCP_' + profile.name.toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_PASSWORD';
+  for (const name of [envName, 'SSH_MCP_PASSWORD']) {
+    const v = process.env[name];
+    console.log('env         :', name, v ? 'set (' + v.length + ' chars)' : 'not set');
+  }
+
+  // Resolve credentials exactly like the server does.
+  let creds;
   try {
-    const req = createRequire(path.join(bundlePath, 'package.json'));
-    const keyring = req('@napi-rs/keyring');
-    const [svc, acc] = (profile.keychainEntry || '').split('/');
-    const stored = new keyring.Entry(svc || 'ssh-mcp', acc || profile.name).getPassword();
-    console.log('keychain    :', stored == null ? 'entry NOT FOUND' : 'entry present (' + stored.length + ' chars)');
+    creds = await resolveCredentials(profile);
   } catch (e) {
-    console.log('keychain    : READ FAILED - ' + (e && e.message ? e.message : e));
+    console.error('CREDENTIALS FAILED: ' + msg(e));
+    return { name: profile.name, ok: false, reason: 'credentials: ' + msg(e) };
+  }
+  console.log(
+    'resolved    : password=' + (creds.password ? creds.password.length + ' chars' : 'none') +
+    ' privateKey=' + (creds.privateKey ? 'yes' : 'no') +
+    ' agent=' + (creds.agentSocket ? 'yes' : 'no'),
+  );
+
+  // Connect with ssh-mcp's own SSH stack (same algorithms, same everything).
+  console.log('connecting  : ...');
+  const created = [];
+  try {
+    const sock = await openJump(profile, created);
+    const conn = new SSHConnection(profile, creds, new Map(), 'tofu', sock);
+    created.push(conn);
+    await withTimeout(conn.ensureConnected(), profile.name);
+    console.log('RESULT      : CONNECTED as ' + profile.user + '@' + profile.host);
+    return { name: profile.name, ok: true };
+  } catch (e) {
+    const reason = msg(e);
+    console.error('RESULT      : FAILED - ' + reason);
+    return { name: profile.name, ok: false, reason };
+  } finally {
+    for (const c of created) await c.close().catch(() => {});
   }
 }
 
-// 3. Environment variable diagnostics (names and lengths only). A stale
-// SSH_MCP_PASSWORD from earlier setx experiments is a classic override.
-const envName =
-  'SSH_MCP_' + profile.name.toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_PASSWORD';
-for (const name of [envName, 'SSH_MCP_PASSWORD']) {
-  const v = process.env[name];
-  console.log('env         :', name, v ? 'set (' + v.length + ' chars)' : 'not set');
+// Select targets: one named profile, or all of them.
+let targets;
+if (profileArg) {
+  const one = config.profiles.find((p) => p.name === profileArg);
+  if (!one) {
+    console.error('profile not found: ' + profileArg + ' (available: ' + config.profiles.map((p) => p.name).join(', ') + ')');
+    process.exit(1);
+  }
+  targets = [one];
+} else {
+  targets = config.profiles;
 }
 
-// 4. Resolve credentials exactly like the server does.
-let creds;
-try {
-  creds = await resolveCredentials(profile);
-} catch (e) {
-  console.error('CREDENTIALS FAILED: ' + (e && e.message ? e.message : e));
-  process.exit(1);
+const results = [];
+for (const p of targets) {
+  results.push(await testProfile(p));
 }
-console.log(
-  'resolved    : password=' + (creds.password ? creds.password.length + ' chars' : 'none') +
-  ' privateKey=' + (creds.privateKey ? 'yes' : 'no') +
-  ' agent=' + (creds.agentSocket ? 'yes' : 'no'),
-);
 
-// 5. Connect with ssh-mcp's own SSH stack (same algorithms, same everything).
-console.log('connecting  : ...');
-const conn = new SSHConnection(profile, creds, new Map(), 'tofu');
-const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('outer timeout (30s)')), 30000));
-try {
-  await Promise.race([conn.ensureConnected(), timeout]);
-  console.log('RESULT      : CONNECTED as ' + profile.user + '@' + profile.host);
-  console.log('Credential and server are fine in THIS process. If the agent still fails,');
-  console.log('the difference is the agent process: its environment variables, its');
-  console.log('ability to read Credential Manager, or which machine it runs on.');
-  await conn.close().catch(() => {});
-  process.exit(0);
-} catch (e) {
-  console.error('RESULT      : FAILED - ' + (e && e.message ? e.message : e));
-  console.error('Compare this against the keychain/env lines above: the resolver offered');
-  console.error('exactly what is listed there, and the server rejected it.');
-  process.exit(1);
+if (results.length > 1 || !profileArg) {
+  console.log('');
+  console.log('=== SUMMARY ===');
+  for (const r of results) {
+    console.log('  ' + r.name.padEnd(20) + ': ' + (r.ok ? 'CONNECTED' : 'FAILED - ' + r.reason));
+  }
 }
+
+const failed = results.filter((r) => !r.ok);
+if (!failed.length) {
+  console.log('');
+  console.log('All tested profiles connected. If the agent still fails, the difference is');
+  console.log('the agent process: its environment variables, its ability to read');
+  console.log('Credential Manager, or which machine it runs on.');
+}
+process.exit(failed.length ? 1 : 0);
