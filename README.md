@@ -300,6 +300,35 @@ Check in this order:
    password but ssh-mcp does not, the server is probably
    keyboard-interactive-only - use key auth in that case.
 
+### Temporary env-var bypass (debug only)
+
+When keychain debugging stalls, take the keychain out of the picture entirely:
+
+1. In `%APPDATA%\ssh-mcp\config.toml`, change the profile's
+   `auth = "keychain"` to `auth = "password"` (one line; `keychainEntry`
+   is simply ignored now).
+2. Give ssh-mcp the password via `SSH_MCP_PASSWORD` (the generic name works
+   for every profile - no name-mapping mistakes):
+   - Agent-scoped (recommended): add an `env` block to the ssh-mcp entry in
+     the agent's MCP config. The password sits in that file temporarily -
+     remove it afterwards.
+   - User-wide: `[Environment]::SetEnvironmentVariable('SSH_MCP_PASSWORD','<pw>','User')`
+     then FULLY restart the agent so it inherits the new value.
+3. Restart the agent and test.
+4. Session-only check, no agent involved (truly temporary - gone when the
+   window closes):
+
+       $env:SSH_MCP_PASSWORD = '<pw>'
+       .\test-connection.ps1
+
+5. Revert afterwards: remove the env block (or
+   `[Environment]::SetEnvironmentVariable('SSH_MCP_PASSWORD',$null,'User')`)
+   and set `auth` back to `"keychain"`.
+
+If even this fails with the same error, the password itself is being rejected
+in the ssh2 path - run `ssh -v root@<host>` and check WHICH method actually
+succeeds (`Offering public key` vs `password`); interactive ssh may be quietly
+using a key.
 If root is key-only on the server, switch the profile to key auth:
 `ssh-keygen -t ed25519` on Windows, append the new `~/.ssh/id_ed25519.pub`
 to the server's `/root/.ssh/authorized_keys` (appending one line is
@@ -412,6 +441,7 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+
 
 
 
