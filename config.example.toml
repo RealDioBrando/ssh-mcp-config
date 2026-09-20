@@ -7,9 +7,9 @@
 #   2. Fill the three <-- FILL lines in the profile below
 #      (server IP, username, project folder on the server).
 #   3. Store the password once, from this repo's folder:
-#        .\set-credential.ps1 -Account server
+#        .\ssh-mcp-tool.ps1 Set server
 #      (or for many servers:
-#        .\set-credential.ps1 -Batch -Accounts server,gpu-01,prod-db)
+#        .\ssh-mcp-tool.ps1 Batch -Accounts server,gpu-01,prod-db)
 #   4. The filled-in config.toml is gitignored so your details stay local.
 # =====================================================================
 
@@ -87,7 +87,7 @@ host = "192.168.1.100"             # <-- FILL: the server's IP or hostname
 port = 22
 user = "root"                      # <-- FILL: your SSH username on that server
 auth = "keychain"                  # password comes from Credential Manager
-keychainEntry = "ssh-mcp/server"   # matches: .\set-credential.ps1 -Account server
+keychainEntry = "ssh-mcp/server"   # matches: .\ssh-mcp-tool.ps1 Set server
 workdir = "/root/project"          # <-- FILL: your project folder on the server
 group = "dev"                      # REQUIRED - see note below
 role = "operator"
@@ -127,7 +127,7 @@ sessionMaxPerConnection = 3        # room for one gdb / tail -f session
 # More servers: add another [[profiles]] block per server. The pattern is
 # always the same - profile name == the helper's -Account name, and
 # keychainEntry points at it. Store all passwords in one run with:
-#   .\set-credential.ps1 -Batch -Accounts server,gpu-01,prod-db
+#   .\ssh-mcp-tool.ps1 Batch -Accounts server,gpu-01,prod-db
 #
 # A second build box, same trust as the first:
 #
@@ -137,7 +137,7 @@ sessionMaxPerConnection = 3        # room for one gdb / tail -f session
 # port = 22
 # user = "root"
 # auth = "keychain"
-# keychainEntry = "ssh-mcp/gpu-01"   # .\set-credential.ps1 -Account gpu-01
+# keychainEntry = "ssh-mcp/gpu-01"   # .\ssh-mcp-tool.ps1 Set gpu-01
 # workdir = "/root/project"
 # group = "dev"
 # role = "operator"
@@ -180,3 +180,4 @@ denylist = [
   "^reboot",
   "^git push --force",    # shared history: never from an agent
 ]
+

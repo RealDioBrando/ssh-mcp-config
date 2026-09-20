@@ -14,7 +14,7 @@ Secondary: Codex (see `codex-mcp-snippet.toml`). The ssh-mcp server config
 |---|---|---|
 | Server IP / hostname | `host` in the profile | `host = "192.168.1.100"` |
 | SSH username | `user` in the profile | `user = "root"` |
-| Password | **Nowhere in the config.** `.\set-credential.ps1 -Account server` stores it once (masked) in Windows Credential Manager; the profile's `keychainEntry = "ssh-mcp/server"` reads it | - |
+| Password | **Nowhere in the config.** `.\ssh-mcp-tool.ps1 Set server` stores it once (masked) in Windows Credential Manager; the profile's `keychainEntry = "ssh-mcp/server"` reads it | - |
 | Project folder on the server | `workdir` in the profile | `workdir = "/root/project"` |
 | Private key path (only for `auth = "key"`) | `keyRef` in the profile | `keyRef = "~/.ssh/id_ed25519"` |
 
@@ -89,16 +89,16 @@ difference is only **where it lives and who can read it**:
 | In any file? | No | No |
 
 For a bunch of servers, Credential Manager is the tidier fit - and
-`set-credential.ps1` manages it:
+`ssh-mcp-tool.ps1` manages it - one tool that replaces the earlier `set-credential.ps1` and `test-connection.ps1`:
 
-    .\set-credential.ps1 -Account gpu-01     # masked prompt -> stores ssh-mcp/gpu-01, verifies, prints config lines
-    .\set-credential.ps1 -Account gpu-01 -Test
-    .\set-credential.ps1 -Account gpu-01 -Verify   # re-enter, compare with stored (MATCH/MISMATCH)
-    .\set-credential.ps1 -Account gpu-01 -FromEnv SSH_MCP_PASSWORD   # store from env var, no typing
-    .\set-credential.ps1 -Account gpu-01 -Delete
-    .\set-credential.ps1 -List               # all ssh-mcp/* entries (names only)
-    .\set-credential.ps1 -Batch -Accounts gpu-01,gpu-02,web-1
-    .\set-credential.ps1 -Batch -AccountList C:\tools\server-names.txt
+    .\ssh-mcp-tool.ps1 Set gpu-01     # masked prompt -> stores ssh-mcp/gpu-01, verifies, prints config lines
+    .\ssh-mcp-tool.ps1 Check gpu-01
+    .\ssh-mcp-tool.ps1 Verify gpu-01   # re-enter, compare with stored (MATCH/MISMATCH)
+    .\ssh-mcp-tool.ps1 Set gpu-01 -FromEnv SSH_MCP_PASSWORD   # store from env var, no typing
+    .\ssh-mcp-tool.ps1 Delete gpu-01
+    .\ssh-mcp-tool.ps1 List               # all ssh-mcp/* entries (names only)
+    .\ssh-mcp-tool.ps1 Batch -Accounts gpu-01,gpu-02,web-1
+    .\ssh-mcp-tool.ps1 Batch -AccountList C:\tools\server-names.txt
 
 Defaults: service `ssh-mcp`, bundle at `C:\tools\ssh-mcp-offline` (override
 with `-BundlePath`). The password is passed to node via stdin - never a
@@ -267,17 +267,23 @@ and a credential WAS found and offered - a keychain miss gives a different
 error (`No credentials resolved`). The server rejected what was offered.
 Check in this order:
 
-1. Sanity-check the stored entry: `.\set-credential.ps1 -Account server -Test`
+1. Sanity-check the stored entry: `.\ssh-mcp-tool.ps1 Check server`
    - "present (N chars)": does N match the real password's length? A
    ONE-character difference is enough to break auth while manual ssh (where
    you retype the real password) still works. The command also fails loudly
    if the stored value contains control characters, such as a stray
    carriage return from pasting.
-2. Re-store, then prove it: `.\set-credential.ps1 -Account server` - watch
-   the printed char count - then `.\set-credential.ps1 -Account server
-   -Verify` to re-enter and compare. It must print MATCH before you retry
-   the connection. (Storing refuses CR/LF outright; no real password
-   contains them.)
+2. Re-store, then prove it: `.\ssh-mcp-tool.ps1 Set server` - watch the
+   printed char count - then `.\ssh-mcp-tool.ps1 Verify server` to re-enter
+   and compare. It must print MATCH before you retry the connection.
+   (Storing refuses CR/LF outright; no real password contains them.)
+3. Isolate the agent entirely: `.\ssh-mcp-tool.ps1 Connect` runs ssh-mcp's
+   own config loader, credential resolver and SSH stack in your PowerShell
+   and reports every step: keychain entry, SSH_MCP_* env vars, the resolved
+   credential, and the real connection result. With no profile name it
+   tests ALL configured profiles in sequence and ends with a summary;
+   naming one tests it alone. ProxyJump (`via`) profiles are tested
+   through their bastion.
 4. Check `user` in the profile - exact and case-sensitive (`root` is not
    `Root` on Linux).
 5. Shortcut: your VS Code SFTP already reaches this server. Open its
@@ -320,17 +326,17 @@ When keychain debugging stalls, take the keychain out of the picture entirely:
    window closes):
 
        $env:SSH_MCP_PASSWORD = '<pw>'
-       .\test-connection.ps1
+       .\ssh-mcp-tool.ps1 Connect
 
 5. Revert afterwards: remove the env block (or
    `[Environment]::SetEnvironmentVariable('SSH_MCP_PASSWORD',$null,'User')`)
    and set `auth` back to `"keychain"`.
 
-Once the env var is PROVEN good (test-connection connects with it), bake it
+Once the env var is PROVEN good (`ssh-mcp-tool.ps1 Connect` connects with it), bake it
 into the keychain with no typing, paste or IME involved:
 
-    .\set-credential.ps1 -Account server -FromEnv SSH_MCP_PASSWORD
-    .\set-credential.ps1 -Account server -Test     # length must equal the env var's
+    .\ssh-mcp-tool.ps1 Set server -FromEnv SSH_MCP_PASSWORD
+    .\ssh-mcp-tool.ps1 Check server     # length must equal the env var's
 
 then set `auth = "keychain"` back in the config, remove the env block/var,
 and restart the agent.
@@ -356,8 +362,8 @@ additive - it does not disturb anyone else's keys), then set
 1. Create the config folder and file (PowerShell):
    `mkdir $env:APPDATA\ssh-mcp -Force`, then copy `config.example.toml` there
    as `config.toml` and fill in the three `<-- FILL` lines: host, user,
-   workdir. Store the password once with `.\set-credential.ps1 -Account server`
-   (or `-Batch -Accounts server,gpu-01` for many servers) - it never goes in
+   workdir. Store the password once with `.\ssh-mcp-tool.ps1 Set server`
+   (or `ssh-mcp-tool.ps1 Batch -Accounts server,gpu-01` for many servers) - it never goes in
    the config file.
 2. Register the MCP server: merge `claude-code/mcp.json` into your project's
    `.mcp.json` (or `~/.claude.json`), or run:
@@ -458,6 +464,8 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+
+
 
 
 
