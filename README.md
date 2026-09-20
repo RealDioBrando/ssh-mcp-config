@@ -61,6 +61,45 @@ the MCP server process inherits it - that keeps the secret out of every config
 file. (Alternative: `auth = "keychain"` + `keychainEntry` uses Windows
 Credential Manager via the optional `@napi-rs/keyring` dependency.)
 
+## Storing passwords: setx vs Windows Credential Manager
+
+Neither option "converts" the password - it is stored exactly as typed. The
+difference is only **where it lives and who can read it**:
+
+| | `setx` env var | Credential Manager (`auth = "keychain"`) |
+|---|---|---|
+| Where | Registry (`HKCU\Environment`) | OS-managed secret store |
+| Who reads it | Every process you start inherits it | Only a program that explicitly asks for that named entry |
+| Per-server | One oddly-named var per server (`SSH_MCP_GPU_01_PASSWORD`) | One named entry per server (`ssh-mcp/gpu-01`) |
+| In any file? | No | No |
+
+For a bunch of servers, Credential Manager is the tidier fit - and
+`set-credential.ps1` manages it:
+
+    .\set-credential.ps1 -Account gpu-01     # masked prompt -> stores ssh-mcp/gpu-01, verifies, prints config lines
+    .\set-credential.ps1 -Account gpu-01 -Test
+    .\set-credential.ps1 -Account gpu-01 -Delete
+    .\set-credential.ps1 -List               # all ssh-mcp/* entries (names only)
+
+Defaults: service `ssh-mcp`, bundle at `C:\tools\ssh-mcp-offline` (override
+with `-BundlePath`). The password is passed to node via stdin - never a
+command-line argument - and the helper uses the same `@napi-rs/keyring`
+library from the bundle that ssh-mcp reads with. Verified end-to-end: a
+credential stored by the helper was read back by ssh-mcp's own
+`resolveCredentials()`.
+
+Then the profile:
+
+    [[profiles]]
+    name = "gpu-01"
+    auth = "keychain"
+    keychainEntry = "ssh-mcp/gpu-01"
+    # no keyRef here: with keychain auth, keyRef means the entry holds a
+    # private key, not a password
+
+Why this fits a shared all-root server: password auth needs zero changes on
+the server - no authorized_keys edits, no risk of touching coworkers' keys,
+one helper command per server.
 ## What role/group already covers vs. the extra [policy] block
 
 `role` + `group` + `approvalPolicy` are the main machinery:
@@ -254,6 +293,7 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+
 
 
 

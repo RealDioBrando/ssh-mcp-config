@@ -63,7 +63,13 @@ transferTimeoutMs = 300000         # 5 min IDLE budget, not total
 #   auth = "password"  + SSH_MCP_<NAME>_PASSWORD env var (see below)
 #   auth = "agent"     + a running ssh-agent (SSH_AUTH_SOCK)
 #   auth = "keychain"  + keychainEntry; Windows Credential Manager via
-#                        @napi-rs/keyring (optional dependency)
+#                        @napi-rs/keyring (included in the offline bundle)
+#
+# Recommended for passwords: run  .\set-credential.ps1 -Account server
+# (from this repo) to store it with a masked prompt, then use
+# auth = "keychain" + keychainEntry = "ssh-mcp/server" on the profile.
+# Do NOT set keyRef on a keychain-password profile: keyRef means the entry
+# holds a private key instead of a password.
 # For a profile named "server", the password env var is SSH_MCP_SERVER_PASSWORD.
 # Non-alphanumeric characters in the name become underscores: profile
 # "gpu-01" -> SSH_MCP_GPU_01_PASSWORD. A generic SSH_MCP_PASSWORD also works
@@ -155,3 +161,4 @@ denylist = [
   "^reboot",
   "^git push --force",    # shared history: never from an agent
 ]
+
