@@ -101,6 +101,56 @@ The bundle includes Windows Credential Manager support (`@napi-rs/keyring`) and
 the exact `package-lock.json` of what was installed. `ssh2` runs in pure-JS mode
 (its optional native bindings were not built) - fully functional. Windows x64
 target; most contents are pure JS but the keyring binary is platform-specific.
+## Updating the bundle
+
+On a machine WITH npm access (e.g. your personal machine), run:
+
+    .\pack-offline.ps1 -Version 2.9.1
+
+The script installs the pinned version into a fresh staging folder (never
+`npm update` in place - a fresh tree cannot carry stale dependencies), runs
+the smoke test itself, and writes `ssh-mcp-<version>-win-x64-offline.zip`
+next to itself. Remove the old zip from the repo, commit, push.
+
+On the work machine:
+
+1. `git pull`
+2. Delete the old extracted folder (e.g. `C:\tools\ssh-mcp-offline`) and
+   extract the new zip to the same path. Always extract clean - overlaying a
+   new zip on an old folder leaves orphaned files from the previous
+   dependency tree.
+3. Nothing else changes: your config lives at `%APPDATA%\ssh-mcp\config.toml`,
+   outside the bundle, so an update never touches credentials, and the agent's
+   mcp.json keeps pointing at the same path.
+4. Restart the agent - MCP servers are spawned at startup.
+5. Smoke test again (below).
+
+## The smoke test, explained
+
+`--dumpToolHashes` is a built-in flag of ssh-mcp itself - not something you
+have to write. It loads the entire program, which means every module and every
+dependency in the bundle must resolve, then prints a JSON table of the 14 MCP
+tools and exits. Open PowerShell on the work machine and run:
+
+    node C:\tools\ssh-mcp-offline\node_modules\ssh-mcp\build\index.js --dumpToolHashes
+
+Expected output (v2.9.0): 14 tool entries, then exit code 0:
+
+    {
+      "list-connections": "1cd9da668b3b3c2f",
+      "list-sessions": "91f5bb270c4bb1ed",
+      ...
+      "signal-process": "2f40c610b52c05f9"
+    }
+
+- **What it proves:** the bundle is complete and runnable - Node found and
+  loaded everything. No server, no SSH connection, no config needed.
+- **What it does not prove:** that the SSH connection or credentials work.
+  The end-to-end test happens through your agent: ask it to call
+  `list-connections`, then `read-command "hostname"`.
+- Each value is the SHA-256 of that tool's description (first 16 hex chars) -
+  diffing them between versions tells you whether the agent-visible tool
+  behavior changed.
 ## Claude Code setup
 
 1. Copy `config.example.toml` to `%APPDATA%\ssh-mcp\config.toml` and fill in the
@@ -204,5 +254,6 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+
 
 
