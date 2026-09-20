@@ -277,16 +277,16 @@ Check in this order:
    -Verify` to re-enter and compare. It must print MATCH before you retry
    the connection. (Storing refuses CR/LF outright; no real password
    contains them.)
-3. Check `user` in the profile - exact and case-sensitive (`root` is not
+4. Check `user` in the profile - exact and case-sensitive (`root` is not
    `Root` on Linux).
-4. Shortcut: your VS Code SFTP already reaches this server. Open its
+5. Shortcut: your VS Code SFTP already reaches this server. Open its
    `sftp.json` and see whether it uses a password or a key - then mirror
    that in the ssh-mcp profile.
-5. Try the same user and password with plain OpenSSH in PowerShell:
+6. Try the same user and password with plain OpenSSH in PowerShell:
    `ssh root@<host>`. If it also fails, the problem is the credentials or
    the server, not ssh-mcp. If it logs in WITHOUT prompting for a password,
    a default key in `~/.ssh` works - use `auth = "key"` on the profile.
-6. On the server (via whatever access you already have), check what sshd
+7. On the server (via whatever access you already have), check what sshd
    allows and what it logged:
 
        sudo sshd -T | grep -Ei 'permitrootlogin|passwordauthentication|kbdinteractive|allowusers'
@@ -295,7 +295,7 @@ Check in this order:
    The most common cause on shared servers: `permitrootlogin
    prohibit-password` - the OpenSSH DEFAULT - root may use keys but never
    passwords, so even the correct root password fails.
-7. ssh-mcp offers password and publickey auth only; it does not do
+8. ssh-mcp offers password and publickey auth only; it does not do
    keyboard-interactive (PAM) prompts. If plain `ssh` works with the
    password but ssh-mcp does not, the server is probably
    keyboard-interactive-only - use key auth in that case.
@@ -412,6 +412,7 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+
 
 
 
