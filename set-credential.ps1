@@ -8,12 +8,18 @@ Manager under service "ssh-mcp" (or -Service), using the same library ssh-mcp
 reads with (@napi-rs/keyring from the offline bundle). Verifies each entry by
 reading it back, then prints the profile lines to paste into config.toml.
 
+-Verify re-prompts and compares what you type with the stored entry, without
+ever printing the password - use it after storing to prove the entry is exact.
+
 Passwords travel PowerShell -> node via stdin, never as command-line
 arguments, so they never show in a process list. Never put passwords in a
 file - provide names only, and let this script prompt for each secret.
 
 .EXAMPLE
 .\set-credential.ps1 -Account gpu-01
+
+.EXAMPLE
+.\set-credential.ps1 -Account gpu-01 -Verify
 
 .EXAMPLE
 .\set-credential.ps1 -Batch -Accounts gpu-01,gpu-02,web-1
@@ -40,6 +46,9 @@ param(
 
   [Parameter(ParameterSetName = 'Account')]
   [switch]$Test,
+
+  [Parameter(ParameterSetName = 'Account')]
+  [switch]$Verify,
 
   [Parameter(ParameterSetName = 'List')]
   [switch]$List,
@@ -77,14 +86,18 @@ function Read-MaskedSecret([string]$prompt) {
   }
 }
 
-function Store-Secret([string]$accountName, [string]$plain) {
+function Invoke-Keychain([string[]]$NodeArgs, [string]$plainSecret) {
   # PS 5.1 pipes to native processes as ASCII by default; force UTF-8 so
   # non-ASCII passwords survive the trip.
   $prevEncoding = $OutputEncoding
   $OutputEncoding = New-Object System.Text.UTF8Encoding $false
   try {
-    $plain | node $keychainJs $BundlePath set $Service $accountName
-    if ($LASTEXITCODE -ne 0) { throw "Storing $Service/$accountName failed." }
+    if ($null -ne $plainSecret) {
+      $plainSecret | node $keychainJs @NodeArgs
+    } else {
+      node $keychainJs @NodeArgs
+    }
+    if ($LASTEXITCODE -ne 0) { throw "keychain.mjs exited with $LASTEXITCODE." }
   } finally {
     $OutputEncoding = $prevEncoding
   }
@@ -101,6 +114,15 @@ if ($Test) {
 if ($Delete) {
   node $keychainJs $BundlePath delete $Service $Account
   exit $LASTEXITCODE
+}
+if ($Verify) {
+  $plain = Read-MaskedSecret "Re-enter password for $Service/$Account (compared with stored)"
+  try {
+    Invoke-Keychain @($BundlePath, "verify", $Service, $Account) $plain
+  } finally {
+    $plain = $null
+  }
+  exit 0
 }
 
 if ($Batch) {
@@ -129,7 +151,7 @@ if ($Batch) {
   foreach ($n in $names) {
     $plain = Read-MaskedSecret "Password for $Service/$n"
     try {
-      Store-Secret $n $plain
+      Invoke-Keychain @($BundlePath, "set", $Service, $n) $plain
       $done += $n
       "  stored $Service/$n"
     } finally {
@@ -149,7 +171,7 @@ if ($Batch) {
 # Single-account mode.
 $plain = Read-MaskedSecret "Password for $Service/$Account"
 try {
-  Store-Secret $Account $plain
+  Invoke-Keychain @($BundlePath, "set", $Service, $Account) $plain
   ""
   "Stored. Add these lines to that server's profile in %APPDATA%\ssh-mcp\config.toml:"
   ""
@@ -158,7 +180,8 @@ try {
   ""
   "Do NOT set keyRef on that profile: with keychain auth, keyRef means the"
   "entry holds a private key instead of a password."
+  ""
+  "Confirm the entry is exact:  .\set-credential.ps1 -Account $Account -Verify"
 } finally {
   $plain = $null
 }
-

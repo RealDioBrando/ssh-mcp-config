@@ -93,6 +93,7 @@ For a bunch of servers, Credential Manager is the tidier fit - and
 
     .\set-credential.ps1 -Account gpu-01     # masked prompt -> stores ssh-mcp/gpu-01, verifies, prints config lines
     .\set-credential.ps1 -Account gpu-01 -Test
+    .\set-credential.ps1 -Account gpu-01 -Verify   # re-enter, compare with stored (MATCH/MISMATCH)
     .\set-credential.ps1 -Account gpu-01 -Delete
     .\set-credential.ps1 -List               # all ssh-mcp/* entries (names only)
     .\set-credential.ps1 -Batch -Accounts gpu-01,gpu-02,web-1
@@ -266,18 +267,26 @@ error (`No credentials resolved`). The server rejected what was offered.
 Check in this order:
 
 1. Sanity-check the stored entry: `.\set-credential.ps1 -Account server -Test`
-   - "present (N chars)": does N match the password you think you stored?
-   Not sure? Re-store it: `.\set-credential.ps1 -Account server`.
-2. Check `user` in the profile - exact and case-sensitive (`root` is not
+   - "present (N chars)": does N match the real password's length? A
+   ONE-character difference is enough to break auth while manual ssh (where
+   you retype the real password) still works. The command also fails loudly
+   if the stored value contains control characters, such as a stray
+   carriage return from pasting.
+2. Re-store, then prove it: `.\set-credential.ps1 -Account server` - watch
+   the printed char count - then `.\set-credential.ps1 -Account server
+   -Verify` to re-enter and compare. It must print MATCH before you retry
+   the connection. (Storing refuses CR/LF outright; no real password
+   contains them.)
+3. Check `user` in the profile - exact and case-sensitive (`root` is not
    `Root` on Linux).
-3. Shortcut: your VS Code SFTP already reaches this server. Open its
+4. Shortcut: your VS Code SFTP already reaches this server. Open its
    `sftp.json` and see whether it uses a password or a key - then mirror
    that in the ssh-mcp profile.
-4. Try the same user and password with plain OpenSSH in PowerShell:
+5. Try the same user and password with plain OpenSSH in PowerShell:
    `ssh root@<host>`. If it also fails, the problem is the credentials or
    the server, not ssh-mcp. If it logs in WITHOUT prompting for a password,
    a default key in `~/.ssh` works - use `auth = "key"` on the profile.
-5. On the server (via whatever access you already have), check what sshd
+6. On the server (via whatever access you already have), check what sshd
    allows and what it logged:
 
        sudo sshd -T | grep -Ei 'permitrootlogin|passwordauthentication|kbdinteractive|allowusers'
@@ -286,7 +295,7 @@ Check in this order:
    The most common cause on shared servers: `permitrootlogin
    prohibit-password` - the OpenSSH DEFAULT - root may use keys but never
    passwords, so even the correct root password fails.
-6. ssh-mcp offers password and publickey auth only; it does not do
+7. ssh-mcp offers password and publickey auth only; it does not do
    keyboard-interactive (PAM) prompts. If plain `ssh` works with the
    password but ssh-mcp does not, the server is probably
    keyboard-interactive-only - use key auth in that case.
@@ -403,6 +412,7 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+
 
 
 
