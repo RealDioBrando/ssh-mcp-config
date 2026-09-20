@@ -232,7 +232,7 @@ Expected output (v2.9.0): 14 tool entries, then exit code 0:
 - Each value is the SHA-256 of that tool's description (first 16 hex chars) -
   diffing them between versions tells you whether the agent-visible tool
   behavior changed.
-## Troubleshooting: two startup errors
+## Troubleshooting: startup and connection errors
 
 **`--config needs a path: --config=<path>`** - ssh-mcp's argument parser only
 accepts the `--flag=value` form, as a single argument. `"--config", "C:/path"`
@@ -259,6 +259,43 @@ Fix, easiest first:
    On a drive outside your user profile, stripping broad entries from the
    folder can affect other users of the machine, which is why option 1 is
    recommended.
+**`SSH connection error: All configured authentication methods failed`** -
+the TCP connection and SSH handshake SUCCEEDED (host and port are right),
+and a credential WAS found and offered - a keychain miss gives a different
+error (`No credentials resolved`). The server rejected what was offered.
+Check in this order:
+
+1. Sanity-check the stored entry: `.\set-credential.ps1 -Account server -Test`
+   - "present (N chars)": does N match the password you think you stored?
+   Not sure? Re-store it: `.\set-credential.ps1 -Account server`.
+2. Check `user` in the profile - exact and case-sensitive (`root` is not
+   `Root` on Linux).
+3. Shortcut: your VS Code SFTP already reaches this server. Open its
+   `sftp.json` and see whether it uses a password or a key - then mirror
+   that in the ssh-mcp profile.
+4. Try the same user and password with plain OpenSSH in PowerShell:
+   `ssh root@<host>`. If it also fails, the problem is the credentials or
+   the server, not ssh-mcp. If it logs in WITHOUT prompting for a password,
+   a default key in `~/.ssh` works - use `auth = "key"` on the profile.
+5. On the server (via whatever access you already have), check what sshd
+   allows and what it logged:
+
+       sudo sshd -T | grep -Ei 'permitrootlogin|passwordauthentication|kbdinteractive|allowusers'
+       sudo journalctl -u ssh -n 50 --no-pager    # or: sudo tail -50 /var/log/auth.log
+
+   The most common cause on shared servers: `permitrootlogin
+   prohibit-password` - the OpenSSH DEFAULT - root may use keys but never
+   passwords, so even the correct root password fails.
+6. ssh-mcp offers password and publickey auth only; it does not do
+   keyboard-interactive (PAM) prompts. If plain `ssh` works with the
+   password but ssh-mcp does not, the server is probably
+   keyboard-interactive-only - use key auth in that case.
+
+If root is key-only on the server, switch the profile to key auth:
+`ssh-keygen -t ed25519` on Windows, append the new `~/.ssh/id_ed25519.pub`
+to the server's `/root/.ssh/authorized_keys` (appending one line is
+additive - it does not disturb anyone else's keys), then set
+`auth = "key"` and `keyRef = "~/.ssh/id_ed25519"`.
 ## Claude Code setup
 
 1. Create the config folder and file (PowerShell):
@@ -366,6 +403,7 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+
 
 
 
