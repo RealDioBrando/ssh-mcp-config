@@ -50,6 +50,11 @@ param(
   [Parameter(ParameterSetName = 'Account')]
   [switch]$Verify,
 
+  # Store from an environment variable instead of a prompt - no typing, no
+  # paste, no IME. Pass the variable name, e.g: -FromEnv SSH_MCP_PASSWORD
+  [Parameter(ParameterSetName = 'Account')]
+  [string]$FromEnv,
+
   [Parameter(ParameterSetName = 'List')]
   [switch]$List,
 
@@ -125,6 +130,20 @@ if ($Verify) {
   exit 0
 }
 
+if ($PSBoundParameters.ContainsKey('FromEnv')) {
+  if (-not $FromEnv) { $FromEnv = 'SSH_MCP_PASSWORD' }
+  if (-not [Environment]::GetEnvironmentVariable($FromEnv)) {
+    throw "Environment variable $FromEnv is not set in THIS session. Set it first: `$env:$FromEnv = 'the-password' (setx-set values need a NEW window to appear)."
+  }
+  node $keychainJs $BundlePath set-from-env $Service $Account $FromEnv
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  ""
+  "Stored from $FromEnv - no prompt, no paste, no IME. The profile keeps:"
+  "    auth = `"keychain`""
+  "    keychainEntry = `"$Service/$Account`""
+  exit 0
+}
+
 if ($Batch) {
   if ($Accounts -and $AccountList) {
     throw "Use either -Accounts or -AccountList, not both."
@@ -185,3 +204,4 @@ try {
 } finally {
   $plain = $null
 }
+

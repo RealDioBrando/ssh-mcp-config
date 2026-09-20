@@ -6,6 +6,7 @@
 //
 // Usage:
 //   node keychain.mjs <bundlePath> set <service> <account>     # secret on stdin
+//   node keychain.mjs <bundlePath> set-from-env <service> <account> [VAR]  # secret from env var
 //   node keychain.mjs <bundlePath> verify <service> <account>  # candidate on stdin
 //   node keychain.mjs <bundlePath> test <service> <account>    # exists? no secret printed
 //   node keychain.mjs <bundlePath> delete <service> <account>
@@ -22,6 +23,7 @@ const [bundlePath, cmd, service = 'ssh-mcp', account] = process.argv.slice(2);
 
 function usage() {
   console.error('usage: node keychain.mjs <bundlePath> set <service> <account>    (secret on stdin)');
+  console.error('       node keychain.mjs <bundlePath> set-from-env <service> <account> [VAR]');
   console.error('       node keychain.mjs <bundlePath> verify <service> <account> (candidate on stdin)');
   console.error('       node keychain.mjs <bundlePath> test <service> <account>');
   console.error('       node keychain.mjs <bundlePath> delete <service> <account>');
@@ -67,6 +69,16 @@ function describe(hits) {
   return hits.map((h) => 'position ' + h.pos + ' (code ' + h.code + ')').join(', ');
 }
 
+// Leading/trailing whitespace on a stored secret is almost always an input
+// artifact (paste, IME) and is invisible in a masked prompt - the exact bug
+// where -Verify "passes" because BOTH entries carry the same stray space.
+function whitespaceEnds(s) {
+  const w = [];
+  if (s.length && /\s/.test(s[0])) w.push('leading whitespace (code ' + s.charCodeAt(0) + ')');
+  if (s.length > 1 && /\s/.test(s[s.length - 1])) w.push('trailing whitespace (code ' + s.charCodeAt(s.length - 1) + ')');
+  return w;
+}
+
 try {
   switch (cmd) {
     case 'set': {
@@ -96,6 +108,39 @@ try {
       if (warn.length) {
         console.log('WARNING: control character(s) at ' + describe(warn) + ' - verify this is intended.');
       }
+      const ws = whitespaceEnds(secret);
+      if (ws.length) {
+        console.log('WARNING: ' + ws.join(' and ') + ' - almost certainly an input artifact.');
+        console.log('Re-store from a known-good env var: set-credential.ps1 -Account ' + account + ' -FromEnv SSH_MCP_PASSWORD');
+      }
+      break;
+    }
+    case 'set-from-env': {
+      if (!account) usage();
+      const varName = process.argv[6] || 'SSH_MCP_PASSWORD';
+      const secret = process.env[varName];
+      if (!secret) {
+        console.error('Environment variable ' + varName + ' is not set in this process.');
+        console.error('Set it for this session first:  $env:' + varName + " = 'the-password'");
+        console.error('(setx-set user variables are NOT visible to an already-open window; use a new window.)');
+        process.exit(1);
+      }
+      const fatalEnv = controlChars(secret).filter((h) => h.code === 10 || h.code === 13);
+      if (fatalEnv.length) {
+        console.error('Refused: ' + varName + ' contains CR/LF at ' + describe(fatalEnv) + '. Nothing was stored.');
+        process.exit(1);
+      }
+      new keyring.Entry(service, account).setPassword(secret);
+      const backEnv = new keyring.Entry(service, account).getPassword();
+      if (backEnv !== secret) {
+        console.error('Stored but read-back verification failed.');
+        process.exit(1);
+      }
+      console.log('Stored ' + service + '/' + account + ' from ' + varName + ' (' + secret.length + ' chars, verified).');
+      const wsEnv = whitespaceEnds(secret);
+      if (wsEnv.length) {
+        console.log('WARNING: ' + wsEnv.join(' and ') + ' - the env var itself carries whitespace.');
+      }
       break;
     }
     case 'verify': {
@@ -115,6 +160,11 @@ try {
       if (hits.length) {
         console.log('The STORED value contains control character(s) at ' + describe(hits) + ' - almost certainly a paste artifact.');
       }
+      const wsV = whitespaceEnds(stored);
+      if (wsV.length) {
+        console.log('The STORED value has ' + wsV.join(' and ') + ' - invisible in the masked prompt.');
+        console.log('Re-store from a known-good env var: set-credential.ps1 -Account ' + account + ' -FromEnv SSH_MCP_PASSWORD');
+      }
       console.log('Re-store the password: set-credential.ps1 -Account ' + account);
       process.exit(1);
     }
@@ -130,6 +180,13 @@ try {
       if (hits.length) {
         console.log('  WARNING: control character(s) at ' + describe(hits) + ' - a real password');
         console.log('  cannot contain these. This entry is corrupt; re-store the password.');
+        process.exit(1);
+      }
+      const wsT = whitespaceEnds(pw);
+      if (wsT.length) {
+        console.log('  WARNING: ' + wsT.join(' and ') + ' - invisible in the masked prompt, and');
+        console.log('  exactly the kind of stray character that makes -Verify "pass" while auth fails.');
+        console.log('  Re-store from a known-good env var: set-credential.ps1 -Account ' + account + ' -FromEnv SSH_MCP_PASSWORD');
         process.exit(1);
       }
       break;
@@ -157,3 +214,6 @@ try {
   console.error(String((err && err.message) || err));
   process.exit(1);
 }
+
+
+

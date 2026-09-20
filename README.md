@@ -94,6 +94,7 @@ For a bunch of servers, Credential Manager is the tidier fit - and
     .\set-credential.ps1 -Account gpu-01     # masked prompt -> stores ssh-mcp/gpu-01, verifies, prints config lines
     .\set-credential.ps1 -Account gpu-01 -Test
     .\set-credential.ps1 -Account gpu-01 -Verify   # re-enter, compare with stored (MATCH/MISMATCH)
+    .\set-credential.ps1 -Account gpu-01 -FromEnv SSH_MCP_PASSWORD   # store from env var, no typing
     .\set-credential.ps1 -Account gpu-01 -Delete
     .\set-credential.ps1 -List               # all ssh-mcp/* entries (names only)
     .\set-credential.ps1 -Batch -Accounts gpu-01,gpu-02,web-1
@@ -325,6 +326,22 @@ When keychain debugging stalls, take the keychain out of the picture entirely:
    `[Environment]::SetEnvironmentVariable('SSH_MCP_PASSWORD',$null,'User')`)
    and set `auth` back to `"keychain"`.
 
+Once the env var is PROVEN good (test-connection connects with it), bake it
+into the keychain with no typing, paste or IME involved:
+
+    .\set-credential.ps1 -Account server -FromEnv SSH_MCP_PASSWORD
+    .\set-credential.ps1 -Account server -Test     # length must equal the env var's
+
+then set `auth = "keychain"` back in the config, remove the env block/var,
+and restart the agent.
+
+Why this can be needed: a masked prompt can consistently add one invisible
+character (a trailing space, an IME artifact). `-Verify` then prints MATCH
+because BOTH entries carry the same stray character - it proves consistency,
+not correctness. `-Test` and `-Verify` now fail loudly when the stored value
+has leading/trailing whitespace, naming the exact culprit (e.g. "trailing
+whitespace (code 32)").
+
 If even this fails with the same error, the password itself is being rejected
 in the ssh2 path - run `ssh -v root@<host>` and check WHICH method actually
 succeeds (`Offering public key` vs `password`); interactive ssh may be quietly
@@ -441,6 +458,7 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+
 
 
 
