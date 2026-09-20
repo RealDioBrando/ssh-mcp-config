@@ -2,12 +2,35 @@
 # ssh-mcp v2.9.0 - single-agent / root-user config
 # Upstream: https://github.com/tufantunc/ssh-mcp
 #
-# 1. Copy this file to:  %APPDATA%\ssh-mcp\config.toml
-#    (or keep it anywhere and pass:  npx ssh-mcp --config=C:/path/config.toml)
-# 2. Fill in every line marked <-- FILL.
-# 3. The filled-in config.toml is gitignored so your host/key details
-#    never get committed.
+# Setup, in order:
+#   1. Copy this file to:  %APPDATA%\ssh-mcp\config.toml
+#   2. Fill the three <-- FILL lines in the profile below
+#      (server IP, username, project folder on the server).
+#   3. Store the password once, from this repo's folder:
+#        .\set-credential.ps1 -Account server
+#      (or for many servers:
+#        .\set-credential.ps1 -Batch -Accounts server,gpu-01,prod-db)
+#   4. The filled-in config.toml is gitignored so your details stay local.
 # =====================================================================
+
+# ---------------------------------------------------------------------
+# WHERE YOUR DETAILS GO
+#
+#   Server IP / hostname  ->  host    (profile below)   e.g. "192.168.1.100"
+#   SSH username          ->  user    (profile below)   e.g. "root"
+#   Password              ->  NOWHERE in this file.
+#                             Stored once by the helper in Windows Credential
+#                             Manager; the profile reads it via keychainEntry.
+#                             Survives reboots. Re-run the helper for one
+#                             account only when that password changes.
+#   Project folder        ->  workdir (profile below)   e.g. "/root/project"
+#
+# Alternative to the keychain: auth = "password" in the profile plus
+#   setx SSH_MCP_SERVER_PASSWORD "..."   (profile "server"; a profile named
+#   "gpu-01" wants SSH_MCP_GPU_01_PASSWORD - non-alphanumerics become
+#   underscores). Works, but every process you run can read env vars; the
+#   Credential Manager path above is the recommended one.
+# ---------------------------------------------------------------------
 
 [defaults]
 defaultProfile = "server"
@@ -45,7 +68,7 @@ transferTimeoutMs = 300000         # 5 min IDLE budget, not total
 # transferRoot = "C:/ssh-mcp-transfers"   # only useful on Linux/macOS clients
 
 # ---------------------------------------------------------------------
-# Profile 1: the main shared server, root user (accepted risk).
+# The main profile: the shared server, root user (accepted risk).
 #
 # HOW POLICY WORKS HERE - three layers, in order:
 #   1. role + group  -> the RBAC matrix. This is the MAIN machinery: it
@@ -57,42 +80,36 @@ transferTimeoutMs = 300000         # 5 min IDLE budget, not total
 #      this shared box. ssh-mcp's built-in never-allowed list (rm -rf /,
 #      mkfs, fork bombs, chmod -R 777 /, ...) always applies on top of
 #      everything and cannot be switched off.
-#
-# AUTH - four methods, credentials NEVER go in this file or on the CLI:
-#   auth = "key"       + keyRef below; passphrase via SSH_MCP_<NAME>_PASSPHRASE
-#   auth = "password"  + SSH_MCP_<NAME>_PASSWORD env var (see below)
-#   auth = "agent"     + a running ssh-agent (SSH_AUTH_SOCK)
-#   auth = "keychain"  + keychainEntry; Windows Credential Manager via
-#                        @napi-rs/keyring (included in the offline bundle)
-#
-# Recommended for passwords: run  .\set-credential.ps1 -Account server
-# (from this repo) to store it with a masked prompt, then use
-# auth = "keychain" + keychainEntry = "ssh-mcp/server" on the profile.
-# Do NOT set keyRef on a keychain-password profile: keyRef means the entry
-# holds a private key instead of a password.
-# For a profile named "server", the password env var is SSH_MCP_SERVER_PASSWORD.
-# Non-alphanumeric characters in the name become underscores: profile
-# "gpu-01" -> SSH_MCP_GPU_01_PASSWORD. A generic SSH_MCP_PASSWORD also works
-# as fallback for all profiles. On Windows, setx SSH_MCP_SERVER_PASSWORD "..."
-# once, then restart the agent so the MCP server inherits it - that keeps the
-# password out of every config file.
 # ---------------------------------------------------------------------
 [[profiles]]
-name = "server"
-host = "SERVER_HOST"               # <-- FILL
+name = "server"                    # any name; must match the helper's -Account
+host = "192.168.1.100"             # <-- FILL: the server's IP or hostname
 port = 22
-user = "root"                      # your accepted risk
-auth = "key"                       # key | password | agent | keychain
-keyRef = "~/.ssh/id_ed25519"       # <-- FILL (path to your private key)
-# For password auth instead, use:
-#   auth = "password"
-#   (and remove keyRef; set SSH_MCP_SERVER_PASSWORD in the environment)
-workdir = "/root/project"          # <-- FILL (where code lives on the server)
+user = "root"                      # <-- FILL: your SSH username on that server
+auth = "keychain"                  # password comes from Credential Manager
+keychainEntry = "ssh-mcp/server"   # matches: .\set-credential.ps1 -Account server
+workdir = "/root/project"          # <-- FILL: your project folder on the server
 group = "dev"                      # REQUIRED - see note below
 role = "operator"
 readOnly = false
 approvalPolicy = "ask-destructive" # scripts auto-run; rm/kill/chmod prompt you
 sessionMaxPerConnection = 3        # room for one gdb / tail -f session
+
+# --- Alternative auth methods (replace the auth/keychainEntry lines above) --
+#
+# Password via environment variable instead of Credential Manager:
+#   auth = "password"
+#   (remove keychainEntry; once run: setx SSH_MCP_SERVER_PASSWORD "...")
+#
+# Private key file:
+#   auth = "key"
+#   keyRef = "~/.ssh/id_ed25519"   # path to the key on THIS Windows machine
+#
+# SSH agent:
+#   auth = "agent"
+#
+# Do NOT set keyRef on a keychain profile: with keychain auth, keyRef means
+# the Credential Manager entry holds a private key instead of a password.
 
 # group = "dev" is REQUIRED here. Without it the tier is inferred from the
 # profile name; a name without prod/staging/dev resolves to "prod", where
@@ -107,37 +124,39 @@ sessionMaxPerConnection = 3        # room for one gdb / tail -f session
 # trustedHostKey = "SHA256:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # ---------------------------------------------------------------------
-# Profile 2 (optional): MORE SERVERS. Just add another [[profiles]] block.
-# Every profile carries its own role / group / approvalPolicy, so trust can
-# differ per machine. The agent picks one with the "profile" tool argument;
-# "server" above is the default. Examples:
+# More servers: add another [[profiles]] block per server. The pattern is
+# always the same - profile name == the helper's -Account name, and
+# keychainEntry points at it. Store all passwords in one run with:
+#   .\set-credential.ps1 -Batch -Accounts server,gpu-01,prod-db
 #
 # A second build box, same trust as the first:
 #
 # [[profiles]]
 # name = "gpu-01"
-# host = "GPU01_HOST"
+# host = "192.168.1.101"             # its IP
 # port = 22
 # user = "root"
-# auth = "password"                # password lives in SSH_MCP_GPU_01_PASSWORD
+# auth = "keychain"
+# keychainEntry = "ssh-mcp/gpu-01"   # .\set-credential.ps1 -Account gpu-01
 # workdir = "/root/project"
 # group = "dev"
 # role = "operator"
 # approvalPolicy = "ask-destructive"
 #
-# A server you only want the agent to LOOK at, never touch:
+# A server you only want the agent to LOOK at, never touch (key auth here,
+# just to show the shape):
 #
 # [[profiles]]
 # name = "prod-db"
-# host = "DB_HOST"
+# host = "10.0.0.5"
 # port = 22
 # user = "root"
 # auth = "key"
 # keyRef = "~/.ssh/id_ed25519"
 # group = "prod"
-# role = "viewer"                  # read-only class only
+# role = "viewer"                    # read-only class only
 # readOnly = true
-# approvalPolicy = "auto"          # nothing to prompt: viewer can only read
+# approvalPolicy = "auto"            # nothing to prompt: viewer can only read
 #
 # Reach a host through a bastion with:  via = "bastion-profile-name"
 # ---------------------------------------------------------------------
@@ -161,4 +180,3 @@ denylist = [
   "^reboot",
   "^git push --force",    # shared history: never from an agent
 ]
-

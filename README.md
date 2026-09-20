@@ -8,6 +8,21 @@ Primary target: a **Claude Code-based company agent** (see `claude-code/`).
 Secondary: Codex (see `codex-mcp-snippet.toml`). The ssh-mcp server config
 (`config.example.toml`) is identical for both.
 
+## Where does each detail go?
+
+| Your detail | Goes in | Example |
+|---|---|---|
+| Server IP / hostname | `host` in the profile | `host = "192.168.1.100"` |
+| SSH username | `user` in the profile | `user = "root"` |
+| Password | **Nowhere in the config.** `.\set-credential.ps1 -Account server` stores it once (masked) in Windows Credential Manager; the profile's `keychainEntry = "ssh-mcp/server"` reads it | - |
+| Project folder on the server | `workdir` in the profile | `workdir = "/root/project"` |
+| Private key path (only for `auth = "key"`) | `keyRef` in the profile | `keyRef = "~/.ssh/id_ed25519"` |
+
+Three steps total: run the helper once per server (or
+`-Batch -Accounts server,gpu-01` for many), fill `host` / `user` / `workdir`
+per profile, done. Passwords never touch any file. The name of the profile
+must match the helper's `-Account` name, and `keychainEntry` is always
+`"ssh-mcp/<that name>"`.
 ## Accepted risk, and what compensates
 
 | Accepted | Compensating control |
@@ -220,7 +235,9 @@ Expected output (v2.9.0): 14 tool entries, then exit code 0:
 ## Claude Code setup
 
 1. Copy `config.example.toml` to `%APPDATA%\ssh-mcp\config.toml` and fill in the
-   `<-- FILL` lines (host, key path, workdir).
+   three `<-- FILL` lines: host, user, workdir. Store the password once with
+   `.\set-credential.ps1 -Account server` (or `-Batch -Accounts server,gpu-01`
+   for many servers) - it never goes in the config file.
 2. Register the MCP server: merge `claude-code/mcp.json` into your project's
    `.mcp.json` (or `~/.claude.json`), or run:
    `claude mcp add ssh-mcp -- npx ssh-mcp --config <path-to-config.toml>`
@@ -320,6 +337,7 @@ Merge `codex-mcp-snippet.toml` into `C:\Users\<you>\.codex\config.toml`:
 - Your company agent is a closed-source fork newer than the public Claude Code
   snapshot these findings are based on. The elicitation test above is the only way
   to know the approval gate actually surfaces in your build.
+
 
 
 
